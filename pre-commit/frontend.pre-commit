@@ -1,0 +1,120 @@
+#!/bin/bash
+
+# Pre-commit checks for Monitoring frontend
+# Rename file to 'pre-commit' and place in [repo path]/.git/hooks
+
+REPO_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && cd "../../" && pwd )
+# ! add path to folder where frontend app is (contains package.json, .npmrc, node_modules etc.)
+FRONTEND_DIR=
+
+echo_error() {
+    echo -e "\x1b[1;31m[Error]\e[0m $1"
+}
+
+echo_success() {
+    echo -e "\x1b[1;32m[Success]\e[0m $1"
+}
+
+echo_warning() {
+      echo -e "\x1b[1;33m[Warning]\e[0m $1"
+}
+
+echo_info() {
+    echo -e "\x1b[1;34m[Info]\e[0m $1"
+}
+
+eval "cd $FRONTEND_DIR"
+
+echo_info "Pre-commit checks"
+echo -e ""
+
+GIT_STATUS=$(git status)
+IS_FAILED=0
+SHOULD_BUILD_FRONT=false
+
+while read -r file
+do
+  IS_JS_FILE=$(grep -cP '^app.*\.(ts|tsx|js|jsx)$' <<< "$file")
+  if (( IS_JS_FILE == 1 ))
+  then
+    SHOULD_BUILD_FRONT=true
+    echo_info "Running lint test for $file"
+
+    LINT_STATUS=$(npx eslint -c eslint.config.mjs $file)
+    LINT_WARNINGS_NUM=$(grep -ce " warning " <<< "$LINT_STATUS")
+    LINT_ERRORS_NUM=$(grep -ce " error " <<< "$LINT_STATUS")
+
+    if (( LINT_ERRORS_NUM > 0 ))
+    then
+      echo_error "Lint errors in $file"
+      echo_error "Total errors: $LINT_ERRORS_NUM"
+      echo -e ""
+      IS_FAILED=1
+    else
+      echo_success "$file passed lint test"
+    fi
+
+    if (( LINT_WARNINGS_NUM > 0 ))
+    then
+      echo_warning "Total lint warnings for $file: $LINT_WARNINGS_NUM"
+    else
+      echo_success "0 lint warnings"
+    fi
+
+    if ((LINT_ERRORS_NUM > 0 | LINT_WARNINGS_NUM > 0))
+    then
+      echo "$LINT_STATUS"
+    fi
+
+  else
+    echo_info "Skipping lint test for $file"
+  fi
+
+  echo -e ""
+done <<< "$(grep -oP '(modified:|added:)\s*\K.*' <<< "$GIT_STATUS")"
+
+if ((IS_FAILED > 0))
+then
+  exit 1
+else
+  echo_success "Passed all lint tests"
+fi
+
+echo -e ""
+if $SHOULD_BUILD_FRONT
+then
+  echo_info "Building prod..."
+
+  BUILD_STATUS=$(npm run build)
+  BUILD_WARNINGS_NUM=$(grep -ce "WARNING" <<< "$BUILD_STATUS")
+  BUILD_ERRORS_NUM=$(grep -ce "ERROR" <<< "$BUILD_STATUS")
+
+  echo $BUILD_STATUS
+  echo "$BUILD_ERRORS_NUM"
+
+  if (( BUILD_ERRORS_NUM > 0 ))
+  then
+    echo_error "BUILD ERRORS"
+    echo_error "Total errors: $BUILD_ERRORS_NUM"
+    echo -e ""
+    echo_error "Failed pre-commit checks"
+    exit 1
+  else
+    echo_success "Successful build"
+
+    if (( BUILD_WARNINGS_NUM > 0 ))
+    then
+      echo_warning "Total build warnings: $BUILD_WARNINGS_NUM"
+    else
+      echo_success "0 build warnings"
+    fi
+  fi
+else
+  echo_info "Skipping build step"
+fi
+
+echo -e ""
+echo_success "Passed pre-commit checks"
+echo -e ""
+
+exit 0
